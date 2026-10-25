@@ -130,3 +130,15 @@ func TestParseGrok(t *testing.T) {
 		t.Fatal("missing percent must be unknown, not 0%")
 	}
 }
+
+func TestTicketExpiry(t *testing.T) {
+	now := time.Date(2026, 10, 25, 0, 0, 0, 0, time.UTC)
+	got := ticketExpiry([]byte(`{"credits":[
+		{"status":"available","expires_at":"2026-11-06T23:31:23.834369Z"},
+		{"status":"redeemed","expires_at":"2026-10-26T00:00:00Z"},
+		{"status":"available","expires_at":"2026-10-20T00:00:00Z"},
+		{"status":"available","expires_at":"2026-10-29T19:34:17.072133Z"}]}`), now)
+	if len(got) != 2 || got[0].Day() != 29 || got[1].Day() != 6 {
+		t.Fatalf("got %v", got)
+	}
+}

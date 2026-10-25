@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -40,8 +41,9 @@ type Service struct {
 // Tickets are ChatGPT's rate limit reset credits; Usable is how many apply
 // right now (only when a limit is hit).
 type Tickets struct {
-	Count  int `json:"available_count"`
-	Usable int `json:"applicable_available_count"`
+	Count   int         `json:"available_count"`
+	Usable  int         `json:"applicable_available_count"`
+	Expires []time.Time `json:"expires,omitempty"` // soonest first
 }
 
 type httpError struct {
@@ -364,15 +366,43 @@ func fetchCodex(a Account) (Service, error) {
 			return Service{}, err
 		}
 	}
-	req, _ := http.NewRequest("GET", "https://chatgpt.com/backend-api/wham/usage", nil)
-	req.Header.Set("Authorization", "Bearer "+str("access_token"))
-	req.Header.Set("ChatGPT-Account-Id", str("account_id"))
-	req.Header.Set("User-Agent", "codex-cli")
+	get := func(path string, v any) error {
+		req, _ := http.NewRequest("GET", "https://chatgpt.com/backend-api/wham/"+path, nil)
+		req.Header.Set("Authorization", "Bearer "+str("access_token"))
+		req.Header.Set("ChatGPT-Account-Id", str("account_id"))
+		req.Header.Set("User-Agent", "codex-cli")
+		return getJSON(req, v)
+	}
 	var body json.RawMessage
-	if err := getJSON(req, &body); err != nil {
+	if err := get("usage", &body); err != nil {
 		return Service{}, err
 	}
-	return parseWham(body)
+	s, err := parseWham(body)
+	// Best effort: the ticket list only adds expiry dates to the count.
+	var rc json.RawMessage
+	if err == nil && s.Tickets != nil && s.Tickets.Count > 0 && get("rate-limit-reset-credits", &rc) == nil {
+		s.Tickets.Expires = ticketExpiry(rc, time.Now())
+	}
+	return s, err
+}
+
+// ticketExpiry returns the expiry of each usable reset ticket, soonest first.
+func ticketExpiry(body []byte, now time.Time) []time.Time {
+	var r struct {
+		Credits []struct {
+			Status    string     `json:"status"`
+			ExpiresAt *time.Time `json:"expires_at"`
+		} `json:"credits"`
+	}
+	json.Unmarshal(body, &r)
+	var out []time.Time
+	for _, c := range r.Credits {
+		if c.Status == "available" && c.ExpiresAt != nil && c.ExpiresAt.After(now) {
+			out = append(out, *c.ExpiresAt)
+		}
+	}
+	slices.SortFunc(out, time.Time.Compare)
+	return out
 }
 
 func parseWham(body []byte) (Service, error) {

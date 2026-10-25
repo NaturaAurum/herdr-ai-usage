@@ -220,6 +220,34 @@ func limitRow(l Limit, w int, color lipgloss.Style) string {
 	return name + bar + style.Render(pct) + dim.Render(reset)
 }
 
+// ticketRow renders "Resets       ●●   ⌛ 4d20h · 12d0h", aligned with
+// limitRow; an expiry turns yellow within 3 days and red within 1.
+func ticketRow(t Tickets, color lipgloss.Style) string {
+	n := min(t.Count, 5)
+	row := fmt.Sprintf("  %-13s", "Resets") + color.Render(strings.Repeat("●", n)) + strings.Repeat(" ", 5-n)
+	if t.Count > 5 {
+		row = fmt.Sprintf("  %-13s", "Resets") + color.Render(fmt.Sprintf("●×%-3d", t.Count))
+	}
+	if len(t.Expires) > 0 {
+		var es []string
+		for _, e := range t.Expires {
+			style := dim
+			switch d := time.Until(e); {
+			case d < 24*time.Hour:
+				style = red
+			case d < 72*time.Hour:
+				style = yellow
+			}
+			es = append(es, style.Render(until(e)))
+		}
+		row += dim.Render("⌛ ") + strings.Join(es, dim.Render(" · "))
+	}
+	if t.Usable > 0 {
+		row += yellow.Render(fmt.Sprintf(" · %d usable now", t.Usable))
+	}
+	return row
+}
+
 func (m *model) View() string {
 	w := max(m.width-3, 20) // 2 columns of gutter for the selection marker
 	var rows []string
@@ -273,12 +301,8 @@ func (m *model) View() string {
 		for _, l := range s.Limits {
 			add(false, limitRow(l, w, color))
 		}
-		if t := s.Tickets; t != nil {
-			row := fmt.Sprintf("  Reset tickets %d", t.Count)
-			if t.Usable > 0 {
-				row += fmt.Sprintf(" · %d usable now", t.Usable)
-			}
-			add(false, dim.Render(row))
+		if t := s.Tickets; t != nil && t.Count > 0 {
+			add(false, ticketRow(*t, color))
 		}
 	}
 
