@@ -1,0 +1,23 @@
+id = "ai-usage"
+name = "AI Usage"
+version = "0.1.0"
+min_herdr_version = "0.9.0"
+description = "Right-side panel showing how much of the Claude and Codex plan limits is left."
+platforms = ["macos"]
+
+[[build]]
+command = ["go", "build", "-o", "herdr-ai-usage", "."]
+
+[[panes]]
+id = "panel"
+title = "AI Usage"
+placement = "split"
+command = ["./herdr-ai-usage"]
+
+# Stacks under the gh-view panel when it is open in this tab, otherwise opens
+# to the right of the focused pane. Close it with `q` inside the panel.
+[[actions]]
+id = "open"
+title = "Open AI usage panel"
+contexts = ["global"]
+command = ["./herdr-ai-usage", "open"]
