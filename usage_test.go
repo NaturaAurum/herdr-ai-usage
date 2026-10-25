@@ -27,13 +27,14 @@ func TestParseClaude(t *testing.T) {
 func TestParseWham(t *testing.T) {
 	s, err := parseWham([]byte(`{"email":"a@b.c","plan_type":"pro","rate_limit":{
 		"primary_window":{"used_percent":40,"limit_window_seconds":604800,"reset_at":1793383594},
-		"secondary_window":{"used_percent":7,"limit_window_seconds":18000,"reset_at":1793300000}}}`))
+		"secondary_window":{"used_percent":7,"limit_window_seconds":18000,"reset_at":1793300000}},
+		"rate_limit_reset_credits":{"available_count":2,"applicable_available_count":0}}`))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if s.Email != "a@b.c" || s.Plan != "pro" || len(s.Limits) != 2 ||
 		s.Limits[0].Name != "Weekly" || s.Limits[0].Used != 40 || s.Limits[1].Name != "5h" ||
-		s.Limits[0].ResetsAt.Unix() != 1793383594 {
+		s.Limits[0].ResetsAt.Unix() != 1793383594 || s.Tickets == nil || s.Tickets.Count != 2 {
 		t.Fatalf("got %+v", s)
 	}
 }

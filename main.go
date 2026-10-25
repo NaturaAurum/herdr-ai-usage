@@ -273,6 +273,13 @@ func (m *model) View() string {
 		for _, l := range s.Limits {
 			add(false, limitRow(l, w, color))
 		}
+		if t := s.Tickets; t != nil {
+			row := fmt.Sprintf("  Reset tickets %d", t.Count)
+			if t.Usable > 0 {
+				row += fmt.Sprintf(" · %d usable now", t.Usable)
+			}
+			add(false, dim.Render(row))
+		}
 	}
 
 	body := max(m.height-1, 1)

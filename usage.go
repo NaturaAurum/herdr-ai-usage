@@ -31,9 +31,17 @@ type Service struct {
 	Email      string    `json:"email,omitempty"`
 	Plan       string    `json:"plan,omitempty"`
 	Limits     []Limit   `json:"limits,omitempty"`
+	Tickets    *Tickets  `json:"tickets,omitempty"` // ChatGPT rate limit reset credits
 	FetchedAt  time.Time `json:"fetched_at"`
 	RetryUntil time.Time `json:"retry_until"`
 	Err        string    `json:"err,omitempty"`
+}
+
+// Tickets are ChatGPT's rate limit reset credits; Usable is how many apply
+// right now (only when a limit is hit).
+type Tickets struct {
+	Count  int `json:"available_count"`
+	Usable int `json:"applicable_available_count"`
 }
 
 type httpError struct {
@@ -380,11 +388,12 @@ func parseWham(body []byte) (Service, error) {
 			Primary   *window `json:"primary_window"`
 			Secondary *window `json:"secondary_window"`
 		} `json:"rate_limit"`
+		Tickets *Tickets `json:"rate_limit_reset_credits"`
 	}
 	if err := json.Unmarshal(body, &r); err != nil {
 		return Service{}, err
 	}
-	s := Service{Email: r.Email, Plan: r.PlanType}
+	s := Service{Email: r.Email, Plan: r.PlanType, Tickets: r.Tickets}
 	for _, w := range []*window{r.RateLimit.Primary, r.RateLimit.Secondary} {
 		if w != nil {
 			s.Limits = append(s.Limits, Limit{windowName(w.WindowSecs / 60), w.UsedPercent, time.Unix(w.ResetAt, 0)})
