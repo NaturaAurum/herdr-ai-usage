@@ -2,7 +2,7 @@ id = "ai-usage"
 name = "AI Usage"
 version = "0.1.0"
 min_herdr_version = "0.9.0"
-description = "Right-side panel showing how much of the Claude and Codex plan limits is left."
+description = "Right-side panel showing how much of your Claude, Codex, OpenCode Go, Cursor and Grok plan limits is left, with multiple accounts per service."
 platforms = ["macos"]
 
 [[build]]
