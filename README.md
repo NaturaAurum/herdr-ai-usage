@@ -19,6 +19,9 @@ If the [gh-view](https://github.com/NaturaAurum/herdr-gh-view) panel is open
 in the tab, this panel stacks under it and shares the right sidebar.
 Results are cached on disk and shared by every panel (Claude: 5 min,
 Codex: 1 min), and `Retry-After` is honored on HTTP 429.
+An expired Claude login, including Claude Code's own, is refreshed and
+written back to the keychain, so the panel keeps working when Claude Code
+hasn't run for a while.
 
 Accounts are grouped by service. Each service has its own color; override
 it in `$(herdr plugin config-dir ai-usage)/colors.json` with hex or an ANSI

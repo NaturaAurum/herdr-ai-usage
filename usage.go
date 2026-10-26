@@ -207,23 +207,45 @@ func writeClaudeCreds(dir string, c claudeCreds) error {
 	return cmd.Run()
 }
 
+// refreshClaude rotates the tokens the way Claude Code does (same scopes) and
+// writes them back, so a running Claude Code session picks them up on its next
+// keychain read.
 func refreshClaude(dir string, c claudeCreds) error {
 	var r struct {
-		AccessToken  string `json:"access_token"`
-		RefreshToken string `json:"refresh_token"`
-		ExpiresIn    int64  `json:"expires_in"`
+		AccessToken    string `json:"access_token"`
+		RefreshToken   string `json:"refresh_token"`
+		ExpiresIn      int64  `json:"expires_in"`
+		RefreshExpires int64  `json:"refresh_token_expires_in"`
 	}
-	if err := postJSON("https://platform.claude.com/v1/oauth/token", map[string]string{
+	body := map[string]string{
 		"grant_type": "refresh_token", "refresh_token": c.str("refreshToken"), "client_id": claudeClientID,
-	}, &r); err != nil || r.AccessToken == "" {
+	}
+	if sc, ok := c.oauth["scopes"].([]any); ok {
+		var ss []string
+		for _, x := range sc {
+			if x, ok := x.(string); ok {
+				ss = append(ss, x)
+			}
+		}
+		body["scope"] = strings.Join(ss, " ")
+	}
+	if err := postJSON("https://platform.claude.com/v1/oauth/token", body, &r); err != nil || r.AccessToken == "" {
 		return errRelogin
 	}
+	now := time.Now()
 	c.oauth["accessToken"] = r.AccessToken
 	if r.RefreshToken != "" {
 		c.oauth["refreshToken"] = r.RefreshToken
 	}
-	c.oauth["expiresAt"] = time.Now().Add(time.Duration(r.ExpiresIn) * time.Second).UnixMilli()
-	return writeClaudeCreds(dir, c)
+	c.oauth["expiresAt"] = now.Add(time.Duration(r.ExpiresIn) * time.Second).UnixMilli()
+	if r.RefreshExpires > 0 {
+		c.oauth["refreshTokenExpiresAt"] = now.Add(time.Duration(r.RefreshExpires) * time.Second).UnixMilli()
+	}
+	if err := writeClaudeCreds(dir, c); err != nil {
+		// The old refresh token is already spent, so this is a logout.
+		return fmt.Errorf("refreshed but could not save Claude login (%v), run claude auth login", err)
+	}
+	return nil
 }
 
 func claudeEmail(dir string) string {
@@ -249,11 +271,13 @@ func fetchClaude(a Account) (Service, error) {
 		return Service{}, err
 	}
 	if c.expired() {
-		if !a.managed() {
-			return Service{}, errors.New("login expired, run claude to refresh")
-		}
 		if err := refreshClaude(a.Dir, c); err != nil {
-			return Service{}, err
+			// A Claude Code session may have rotated the token at the same time.
+			if c2, e := readClaudeCreds(a.Dir); e == nil && !c2.expired() {
+				c = c2
+			} else {
+				return Service{}, err
+			}
 		}
 	}
 	req, _ := http.NewRequest("GET", "https://api.anthropic.com/api/oauth/usage", nil)
