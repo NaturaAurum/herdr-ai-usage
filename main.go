@@ -336,6 +336,10 @@ func (m *model) View() string {
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "restore" {
+		restorePanels()
+		return
+	}
 	if len(os.Args) > 1 && os.Args[1] == "open" {
 		if err := openPanel(); err != nil {
 			fmt.Fprintln(os.Stderr, err)

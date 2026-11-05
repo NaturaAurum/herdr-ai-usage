@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"time"
 )
 
 func herdrBin() string {
@@ -73,6 +74,10 @@ func openPanel() error {
 			target, dir = p, "down"
 		}
 	}
+	return openSplit(target, dir)
+}
+
+func openSplit(target, dir string) error {
 	args := []string{"plugin", "pane", "open", "--plugin", "ai-usage", "--entrypoint", "panel",
 		"--placement", "split", "--direction", dir, "--no-focus"}
 	if target != "" {
@@ -81,6 +86,28 @@ func openPanel() error {
 	cmd := exec.Command(herdrBin(), args...)
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 	return cmd.Run()
+}
+
+// restorePanels runs as a [[startup]] hook. herdr brings plugin panes back
+// from a restart as plain shells that keep the "AI Usage" label, so each one
+// is swapped for a live panel in the same spot: split it, then close it.
+func restorePanels() {
+	var list struct {
+		Result struct{ Panes []paneInfo } `json:"result"`
+	}
+	// ponytail: waits for the first pane only, assuming herdr restores the
+	// whole session at once; poll for a stable pane count if tabs go missing.
+	for range 15 {
+		if herdrJSON(&list, "pane", "list") == nil && len(list.Result.Panes) > 0 {
+			break
+		}
+		time.Sleep(time.Second)
+	}
+	for _, p := range list.Result.Panes {
+		if p.Label == "AI Usage" && openSplit(p.PaneID, "down") == nil {
+			exec.Command(herdrBin(), "pane", "close", p.PaneID).Run()
+		}
+	}
 }
 
 type rect struct{ X, Y, Width, Height int }

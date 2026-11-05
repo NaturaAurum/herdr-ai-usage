@@ -14,6 +14,10 @@ title = "AI Usage"
 placement = "split"
 command = ["./herdr-ai-usage"]
 
+# herdr restores plugin panes as plain shells after a restart; swap them back.
+[[startup]]
+command = ["./herdr-ai-usage", "restore"]
+
 # Stacks under the gh-view panel when it is open in this tab, otherwise opens
 # to the right of the focused pane. Close it with `q` inside the panel.
 [[actions]]
