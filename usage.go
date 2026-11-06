@@ -390,43 +390,129 @@ func fetchCodex(a Account) (Service, error) {
 			return Service{}, err
 		}
 	}
-	get := func(path string, v any) error {
-		req, _ := http.NewRequest("GET", "https://chatgpt.com/backend-api/wham/"+path, nil)
+	call := func(method, path string, in, v any) error {
+		var body io.Reader
+		if in != nil {
+			b, _ := json.Marshal(in)
+			body = bytes.NewReader(b)
+		}
+		req, _ := http.NewRequest(method, "https://chatgpt.com/backend-api/wham/"+path, body)
 		req.Header.Set("Authorization", "Bearer "+str("access_token"))
 		req.Header.Set("ChatGPT-Account-Id", str("account_id"))
 		req.Header.Set("User-Agent", "codex-cli")
+		req.Header.Set("Content-Type", "application/json")
 		return getJSON(req, v)
 	}
 	var body json.RawMessage
-	if err := get("usage", &body); err != nil {
+	if err := call("GET", "usage", nil, &body); err != nil {
 		return Service{}, err
 	}
 	s, err := parseWham(body)
-	// Best effort: the ticket list only adds expiry dates to the count.
+	// Best effort: the ticket list adds expiry dates and lets auto reset pick one.
 	var rc json.RawMessage
-	if err == nil && s.Tickets != nil && s.Tickets.Count > 0 && get("rate-limit-reset-credits", &rc) == nil {
-		s.Tickets.Expires = ticketExpiry(rc, time.Now())
+	if err == nil && s.Tickets != nil && s.Tickets.Count > 0 && call("GET", "rate-limit-reset-credits", nil, &rc) == nil {
+		now := time.Now()
+		cs := availableCredits(rc, now)
+		s.Tickets.Expires = ticketExpiry(cs)
+		if id, why := pickTicket(s, cs, now); id != "" && autoReset(a, id, why, func(in, out any) error {
+			return call("POST", "rate-limit-reset-credits/consume", in, out)
+		}) {
+			return fetchCodex(a) // show the reset; autoReset's pause stops a second spend
+		}
 	}
 	return s, err
 }
 
-// ticketExpiry returns the expiry of each usable reset ticket, soonest first.
-func ticketExpiry(body []byte, now time.Time) []time.Time {
-	var r struct {
-		Credits []struct {
-			Status    string     `json:"status"`
-			ExpiresAt *time.Time `json:"expires_at"`
-		} `json:"credits"`
+// Auto reset spends a ChatGPT reset ticket when a limit is all but used up,
+// or when a ticket is about to expire unused.
+const (
+	autoResetUsed   = 99.8
+	autoResetExpiry = 5 * time.Minute
+	autoResetPause  = 10 * time.Minute
+)
+
+type credit struct {
+	ID        string     `json:"id"`
+	Status    string     `json:"status"`
+	ExpiresAt *time.Time `json:"expires_at"`
+}
+
+func (c credit) expiry() time.Time {
+	if c.ExpiresAt == nil {
+		return time.Date(9999, 1, 1, 0, 0, 0, 0, time.UTC)
 	}
+	return *c.ExpiresAt
+}
+
+// availableCredits returns the unspent, unexpired reset tickets, soonest expiry first.
+func availableCredits(body []byte, now time.Time) []credit {
+	var r struct{ Credits []credit }
 	json.Unmarshal(body, &r)
-	var out []time.Time
+	var out []credit
 	for _, c := range r.Credits {
-		if c.Status == "available" && c.ExpiresAt != nil && c.ExpiresAt.After(now) {
+		if c.Status == "available" && c.expiry().After(now) {
+			out = append(out, c)
+		}
+	}
+	slices.SortStableFunc(out, func(a, b credit) int { return a.expiry().Compare(b.expiry()) })
+	return out
+}
+
+func ticketExpiry(cs []credit) []time.Time {
+	var out []time.Time
+	for _, c := range cs {
+		if c.ExpiresAt != nil {
 			out = append(out, *c.ExpiresAt)
 		}
 	}
-	slices.SortFunc(out, time.Time.Compare)
 	return out
+}
+
+// pickTicket returns the ticket to spend now and why, or "" to keep them all.
+func pickTicket(s Service, cs []credit, now time.Time) (id, why string) {
+	if len(cs) == 0 {
+		return "", ""
+	}
+	for _, l := range s.Limits {
+		if l.Used >= autoResetUsed {
+			return cs[0].ID, fmt.Sprintf("%s %.1f%% used", l.Name, l.Used)
+		}
+	}
+	if left := cs[0].expiry().Sub(now); left <= autoResetExpiry {
+		return cs[0].ID, fmt.Sprintf("expires in %s", left.Round(time.Second))
+	}
+	return "", ""
+}
+
+// autoReset spends ticket id and logs the outcome to autoreset.log. After a
+// reset, or an error that may hide one, it pauses autoResetPause per account so
+// a usage read that lags behind the reset can't burn a second ticket.
+func autoReset(a Account, id, why string, consume func(in, out any) error) bool {
+	mark := filepath.Join(cfgDir, "cache", a.ID+".autoreset")
+	if fi, err := os.Stat(mark); err == nil && time.Since(fi.ModTime()) < autoResetPause {
+		return false
+	}
+	var r struct {
+		Code string `json:"code"`
+	}
+	err := consume(map[string]string{
+		"redeem_request_id": fmt.Sprintf("herdr-ai-usage-%s-%d", id, time.Now().Unix()),
+		"credit_id":         id,
+	}, &r)
+	outcome := r.Code
+	if err != nil {
+		outcome = err.Error()
+	}
+	paused := os.WriteFile(mark, []byte(outcome), 0o600) == nil
+	if err == nil && r.Code != "reset" {
+		os.Remove(mark) // nothing spent: try again on the next fetch
+	}
+	if f, ferr := os.OpenFile(filepath.Join(cfgDir, "autoreset.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600); ferr == nil {
+		fmt.Fprintf(f, "%s %s ticket %s (%s): %s\n", time.Now().Format(time.RFC3339), a.ID, id, why, outcome)
+		f.Close()
+	}
+	// Without the pause file, fetchCodex's re-read could spend another ticket.
+	return paused && err == nil && r.Code == "reset"
 }
 
 func parseWham(body []byte) (Service, error) {

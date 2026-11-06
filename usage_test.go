@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -133,12 +135,59 @@ func TestParseGrok(t *testing.T) {
 
 func TestTicketExpiry(t *testing.T) {
 	now := time.Date(2026, 10, 25, 0, 0, 0, 0, time.UTC)
-	got := ticketExpiry([]byte(`{"credits":[
+	got := ticketExpiry(availableCredits([]byte(`{"credits":[
 		{"status":"available","expires_at":"2026-11-06T23:31:23.834369Z"},
 		{"status":"redeemed","expires_at":"2026-10-26T00:00:00Z"},
 		{"status":"available","expires_at":"2026-10-20T00:00:00Z"},
-		{"status":"available","expires_at":"2026-10-29T19:34:17.072133Z"}]}`), now)
+		{"status":"available","expires_at":"2026-10-29T19:34:17.072133Z"}]}`), now))
 	if len(got) != 2 || got[0].Day() != 29 || got[1].Day() != 6 {
 		t.Fatalf("got %v", got)
+	}
+}
+
+func TestPickTicket(t *testing.T) {
+	now := time.Date(2026, 11, 7, 0, 0, 0, 0, time.UTC)
+	at := func(d time.Duration) *time.Time { t := now.Add(d); return &t }
+	cs := []credit{{ID: "soon", ExpiresAt: at(time.Hour)}, {ID: "late", ExpiresAt: at(48 * time.Hour)}}
+	low := Service{Limits: []Limit{{Name: "5h", Used: 99.7}, {Name: "Weekly", Used: 40}}}
+	full := Service{Limits: []Limit{{Name: "5h", Used: 20}, {Name: "Weekly", Used: 99.8}}}
+	for _, c := range []struct {
+		s    Service
+		cs   []credit
+		want string
+	}{
+		{low, cs, ""},
+		{full, cs, "soon"},
+		{full, nil, ""},
+		{low, []credit{{ID: "x", ExpiresAt: at(5 * time.Minute)}}, "x"},
+		{low, []credit{{ID: "x", ExpiresAt: at(6 * time.Minute)}}, ""},
+		{low, []credit{{ID: "forever"}}, ""},
+	} {
+		if id, why := pickTicket(c.s, c.cs, now); id != c.want {
+			t.Errorf("pickTicket(%v) = %q (%s), want %q", c.s.Limits, id, why, c.want)
+		}
+	}
+}
+
+// Never talks to ChatGPT: consume is a fake, so no real ticket is spent.
+func TestAutoResetPause(t *testing.T) {
+	cfgDir = t.TempDir()
+	os.MkdirAll(filepath.Join(cfgDir, "cache"), 0o700)
+	a := Account{ID: "codex-test"}
+	calls := 0
+	consume := func(code string) func(in, out any) error {
+		return func(in, out any) error {
+			calls++
+			return json.Unmarshal([]byte(`{"code":"`+code+`","windows_reset":1}`), out)
+		}
+	}
+	if autoReset(a, "c1", "test", consume("nothing_to_reset")) || calls != 1 {
+		t.Fatal("nothing_to_reset counted as a reset")
+	}
+	if !autoReset(a, "c1", "test", consume("reset")) || calls != 2 {
+		t.Fatal("reset not reported")
+	}
+	if autoReset(a, "c2", "test", consume("reset")) || calls != 2 {
+		t.Fatal("second ticket spent inside the pause")
 	}
 }

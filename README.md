@@ -24,6 +24,12 @@ An expired Claude login, including Claude Code's own, is refreshed and
 written back to the keychain, so the panel keeps working when Claude Code
 hasn't run for a while.
 
+Codex accounts spend a ChatGPT rate limit reset ticket by themselves when a
+limit reaches 99.8% used, or when a ticket is 5 minutes from expiring unused
+(the soonest-expiring ticket goes first). ChatGPT may decline a reset the
+usage doesn't need yet; every attempt is logged to
+`$(herdr plugin config-dir ai-usage)/autoreset.log`.
+
 Accounts are grouped by service. Each service has its own color; override
 it in `$(herdr plugin config-dir ai-usage)/colors.json` with hex or an ANSI
 number, then reopen the panel:
