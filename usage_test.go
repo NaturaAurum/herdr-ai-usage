@@ -11,18 +11,58 @@ import (
 )
 
 func TestParseClaude(t *testing.T) {
-	ls, err := parseClaude([]byte(`{"five_hour":{"utilization":1.0},"limits":[
+	s, err := parseClaude([]byte(`{"five_hour":{"utilization":1.0},"limits":[
 		{"kind":"session","percent":12,"resets_at":"2026-10-25T05:40:00.288449+00:00","scope":null},
 		{"kind":"weekly_all","percent":3,"resets_at":"2026-10-29T07:00:00+00:00","scope":null},
-		{"kind":"weekly_scoped","percent":0,"resets_at":"2026-10-29T07:00:00+00:00","scope":{"model":{"id":null,"display_name":"Fable"}}}]}`))
+		{"kind":"weekly_scoped","percent":0,"resets_at":"2026-10-29T07:00:00+00:00","scope":{"model":{"id":null,"display_name":"Fable"}}}]}`), time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
+	ls := s.Limits
 	if len(ls) != 3 || ls[0].Name != "5h" || ls[0].Used != 12 || ls[2].Name != "Weekly Fable" {
 		t.Fatalf("got %+v", ls)
 	}
 	if want := time.Date(2026, 10, 25, 5, 40, 0, 288449000, time.UTC); !ls[0].ResetsAt.Equal(want) {
 		t.Fatalf("resets_at %v", ls[0].ResetsAt)
+	}
+}
+
+func TestClaudeTickets(t *testing.T) {
+	now := time.Date(2026, 11, 10, 0, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		name string
+		body string
+	}{
+		{"absent", `{}`},
+		{"null", `{"cedar_ember":null}`},
+		{"ineligible", `{"cedar_ember":{"eligible":false,"grants":[{"resets_left":1,"starts_at":"2026-11-01T00:00:00Z","ends_at":"2026-12-01T00:00:00Z","usable_now":true}]}}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, err := parseClaude([]byte(tc.body), now)
+			if err != nil || s.Tickets != nil {
+				t.Fatalf("tickets = %+v, err = %v", s.Tickets, err)
+			}
+		})
+	}
+	s, err := parseClaude([]byte(`{"cedar_ember":{"eligible":true,"grants":[
+		{"resets_left":2,"starts_at":"2026-11-01T00:00:00Z","ends_at":"2026-11-30T00:00:00Z","usable_now":false,"use_requires_limit":true},
+		{"resets_left":3,"starts_at":"2026-11-10T00:00:00Z","ends_at":"2026-11-20T00:00:00Z","usable_now":true},
+		{"resets_left":7,"starts_at":"2026-11-01T00:00:00Z","ends_at":"2026-11-10T00:00:00Z","usable_now":true},
+		{"resets_left":7,"starts_at":"2026-11-11T00:00:00Z","ends_at":"2026-11-30T00:00:00Z","usable_now":true},
+		{"resets_left":7,"starts_at":"2026-11-01T00:00:00Z","ends_at":"2026-11-30T00:00:00Z","paused":true,"usable_now":true},
+		{"resets_left":0,"starts_at":"2026-11-01T00:00:00Z","ends_at":"2026-11-30T00:00:00Z","usable_now":true},
+		{"resets_left":-1,"starts_at":"2026-11-01T00:00:00Z","ends_at":"2026-11-30T00:00:00Z","usable_now":true},
+		{"resets_left":7,"ends_at":"2026-11-30T00:00:00Z","usable_now":true},
+		{"resets_left":7,"starts_at":"2026-11-01T00:00:00Z","usable_now":true}
+	]}}`), now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Tickets == nil || s.Tickets.Count != 5 || s.Tickets.Usable != 3 {
+		t.Fatalf("tickets = %+v", s.Tickets)
+	}
+	if es := s.Tickets.Expires; len(es) != 2 || es[0].Day() != 20 || es[1].Day() != 30 {
+		t.Fatalf("expiry = %v", es)
 	}
 }
 

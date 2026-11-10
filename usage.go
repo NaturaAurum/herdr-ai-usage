@@ -32,14 +32,14 @@ type Service struct {
 	Email      string    `json:"email,omitempty"`
 	Plan       string    `json:"plan,omitempty"`
 	Limits     []Limit   `json:"limits,omitempty"`
-	Tickets    *Tickets  `json:"tickets,omitempty"` // ChatGPT rate limit reset credits
+	Tickets    *Tickets  `json:"tickets,omitempty"`
 	FetchedAt  time.Time `json:"fetched_at"`
 	RetryUntil time.Time `json:"retry_until"`
 	Err        string    `json:"err,omitempty"`
 }
 
-// Tickets are ChatGPT's rate limit reset credits; Usable is how many apply
-// right now (only when a limit is hit).
+// Tickets are saved rate limit resets; Usable is how many the service allows
+// spending right now.
 type Tickets struct {
 	Count   int         `json:"available_count"`
 	Usable  int         `json:"applicable_available_count"`
@@ -280,18 +280,21 @@ func fetchClaude(a Account) (Service, error) {
 			}
 		}
 	}
-	req, _ := http.NewRequest("GET", "https://api.anthropic.com/api/oauth/usage", nil)
+	req, _ := http.NewRequest("GET", "https://api.anthropic.com/api/oauth/usage?cedar_ember=1", nil)
 	req.Header.Set("Authorization", "Bearer "+c.str("accessToken"))
 	req.Header.Set("anthropic-beta", "oauth-2025-04-20")
+	// Reset inventory requires the Claude CLI identity as well as the opt-in query.
+	req.Header.Set("User-Agent", "claude-cli/2.1.322 (external, cli)")
 	var body json.RawMessage
 	if err := getJSON(req, &body); err != nil {
 		return Service{}, err
 	}
-	ls, err := parseClaude(body)
-	return Service{Email: claudeEmail(a.Dir), Plan: c.str("subscriptionType"), Limits: ls}, err
+	s, err := parseClaude(body, time.Now())
+	s.Email, s.Plan = claudeEmail(a.Dir), c.str("subscriptionType")
+	return s, err
 }
 
-func parseClaude(body []byte) ([]Limit, error) {
+func parseClaude(body []byte, now time.Time) (Service, error) {
 	var r struct {
 		Limits []struct {
 			Kind     string    `json:"kind"`
@@ -303,11 +306,21 @@ func parseClaude(body []byte) ([]Limit, error) {
 				} `json:"model"`
 			} `json:"scope"`
 		} `json:"limits"`
+		Resets *struct {
+			Eligible bool `json:"eligible"`
+			Grants   []struct {
+				ResetsLeft int       `json:"resets_left"`
+				StartsAt   time.Time `json:"starts_at"`
+				EndsAt     time.Time `json:"ends_at"`
+				Paused     bool      `json:"paused"`
+				UsableNow  bool      `json:"usable_now"`
+			} `json:"grants"`
+		} `json:"cedar_ember"`
 	}
 	if err := json.Unmarshal(body, &r); err != nil {
-		return nil, err
+		return Service{}, err
 	}
-	var ls []Limit
+	var s Service
 	for _, l := range r.Limits {
 		name := l.Kind
 		switch l.Kind {
@@ -321,9 +334,23 @@ func parseClaude(body []byte) ([]Limit, error) {
 				name += " " + l.Scope.Model.DisplayName
 			}
 		}
-		ls = append(ls, Limit{name, l.Percent, l.ResetsAt})
+		s.Limits = append(s.Limits, Limit{name, l.Percent, l.ResetsAt})
 	}
-	return ls, nil
+	if r.Resets != nil && r.Resets.Eligible {
+		s.Tickets = &Tickets{}
+		for _, g := range r.Resets.Grants {
+			if g.ResetsLeft <= 0 || g.Paused || g.StartsAt.IsZero() || now.Before(g.StartsAt) || !now.Before(g.EndsAt) {
+				continue
+			}
+			s.Tickets.Count += g.ResetsLeft
+			if g.UsableNow {
+				s.Tickets.Usable += g.ResetsLeft
+			}
+			s.Tickets.Expires = append(s.Tickets.Expires, g.EndsAt)
+		}
+		slices.SortFunc(s.Tickets.Expires, func(a, b time.Time) int { return a.Compare(b) })
+	}
+	return s, nil
 }
 
 // ---- Codex ----

@@ -24,6 +24,10 @@ An expired Claude login, including Claude Code's own, is refreshed and
 written back to the keychain, so the panel keeps working when Claude Code
 hasn't run for a while.
 
+Claude and Codex show saved reset tickets in a `Resets` row, with the remaining
+count, time until expiry, and the number usable now. Claude tickets are
+display-only; paused, future, expired, and exhausted grants are excluded.
+
 Codex accounts spend a ChatGPT rate limit reset ticket by themselves when a
 limit reaches 99.8% used, or when a ticket is 5 minutes from expiring unused
 (the soonest-expiring ticket goes first). ChatGPT may decline a reset the
