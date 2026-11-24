@@ -121,7 +121,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case adding:
 			m.mode = normal
 			for _, id := range providerOrder {
-				if providers[id].key != k {
+				if providers[id].key == "" || providers[id].key != k {
 					continue
 				}
 				a := newManaged(id)
@@ -200,9 +200,12 @@ func until(t time.Time) string {
 // in the service color until it nears the limit.
 func limitRow(l Limit, w int, color lipgloss.Style) string {
 	used := l.Used
-	reset := "↻ " + until(l.ResetsAt)
-	if !l.ResetsAt.IsZero() && l.ResetsAt.Before(time.Now()) {
-		used, reset = 0, "↻ reset" // window rolled over since it was observed
+	var reset string
+	if !l.ResetsAt.IsZero() {
+		reset = "↻ " + until(l.ResetsAt)
+		if l.ResetsAt.Before(time.Now()) {
+			used, reset = 0, "↻ reset" // window rolled over since it was observed
+		}
 	}
 	left := math.Max(100-used, 0)
 	style := color
@@ -318,7 +321,9 @@ func (m *model) View() string {
 	case m.mode == adding:
 		var opts []string
 		for _, id := range providerOrder {
-			opts = append(opts, providers[id].key+" "+id)
+			if key := providers[id].key; key != "" {
+				opts = append(opts, key+" "+id)
+			}
 		}
 		help = "add: " + strings.Join(opts, " · ")
 	case m.mode == pasting:

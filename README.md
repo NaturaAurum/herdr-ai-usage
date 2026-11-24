@@ -10,8 +10,10 @@ much of your AI plan limits is left:
 | OpenCode Go | `~/.local/share/opencode/auth.json` | `opencode auth login` in its own `XDG_DATA_HOME` |
 | Cursor | Cursor.app state DB | paste the `WorkosCursorSessionToken` cookie |
 | Grok | `~/.grok/auth.json` | `grok login` in its own `GROK_HOME` |
+| Google Antigravity | Active Google account in Antigravity CLI (`agy`) | Not supported |
 
-Services without a login are hidden until you sign in or link one. A linked account gets its own login dir under
+Services without a login are hidden until you sign in or link one, except
+Google Antigravity, which appears when `agy` is installed. A linked account gets its own login dir under
 `herdr plugin config-dir ai-usage`, so it also works as
 `CLAUDE_CONFIG_DIR=<dir> claude` or `CODEX_HOME=<dir> codex`.
 
@@ -23,6 +25,12 @@ Codex: 1 min), and `Retry-After` is honored on HTTP 429.
 An expired Claude login, including Claude Code's own, is refreshed and
 written back to the keychain, so the panel keeps working when Claude Code
 hasn't run for a while.
+
+Google Antigravity requires [Antigravity CLI](https://antigravity.google/docs/install?tab=cli)
+1.1.11 or later. Install it with `brew install --cask antigravity-cli`, then run
+`agy` to sign in if needed. Reopen the panel to see the reported five-hour
+(`5h`) and weekly (`1w`) limits for each model group. The panel refreshes
+Antigravity usage every five minutes.
 
 Claude and Codex show saved reset tickets in a `Resets` row, with the remaining
 count, time until expiry, and the number usable now. Claude tickets are

@@ -16,9 +16,9 @@ import (
 	"unicode/utf16"
 )
 
-// provider is one AI service. creds checks a login exists in dir ("" = the
-// CLI's default location). login runs the service's own CLI login against a
-// managed dir; nil means the account is added by pasting a token instead.
+// provider is one AI service. An empty key means only the default account is
+// available. Otherwise, login runs a CLI login in the managed dir, or nil
+// means the user adds the account by pasting a token.
 type provider struct {
 	title string
 	key   string // key in the panel's add prompt
@@ -29,7 +29,7 @@ type provider struct {
 	login func(dir string) *exec.Cmd
 }
 
-var providerOrder = []string{"claude", "codex", "opencode", "cursor", "grok"}
+var providerOrder = []string{"claude", "codex", "opencode", "cursor", "grok", "antigravity"}
 
 var providers = map[string]provider{
 	// The Claude usage endpoint is rate limited per token, and other tools
@@ -59,6 +59,9 @@ var providers = map[string]provider{
 		creds: func(dir string) error { _, err := grokAuth(dir); return err },
 		fetch: fetchGrok,
 		login: func(dir string) *exec.Cmd { return envCmd("GROK_HOME="+dir, "grok", "login") }},
+	"antigravity": {title: "Google Antigravity", color: "#4285F4", ttl: 5 * time.Minute,
+		creds: func(string) error { _, err := antigravityCLI(); return err },
+		fetch: fetchAntigravity},
 }
 
 // loadColors applies <cfgDir>/colors.json, e.g. {"claude": "#ff8800", "codex": "6"}

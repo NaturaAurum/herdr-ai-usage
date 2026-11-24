@@ -173,6 +173,25 @@ func TestParseGrok(t *testing.T) {
 	}
 }
 
+func TestParseAntigravity(t *testing.T) {
+	s, err := parseAntigravity([]byte(`{"status":"SUCCESS","command":{"name":"usage","data":{"groups":[
+		{"name":"Gemini Models","buckets":[
+			{"window":"weekly","remaining_fraction":0.25,"reset_time":"2026-12-01T02:24:25Z"},
+			{"window":"5h","reset_time":"2026-11-24T07:24:25Z"}]},
+		{"name":"Claude and GPT models","buckets":[
+			{"window":"weekly","remaining_fraction":0,"disabled":true},
+			{"window":"5h","remaining_fraction":0}]}
+	]}}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(s.Limits) != 2 || s.Limits[0].Name != "Gemini 1w" || s.Limits[0].Used != 75 ||
+		s.Limits[0].ResetsAt.Format(time.RFC3339) != "2026-12-01T02:24:25Z" ||
+		s.Limits[1].Name != "Claude/GPT 5h" || s.Limits[1].Used != 100 || !s.Limits[1].ResetsAt.IsZero() {
+		t.Fatalf("limits = %+v", s.Limits)
+	}
+}
+
 func TestTicketExpiry(t *testing.T) {
 	now := time.Date(2026, 10, 25, 0, 0, 0, 0, time.UTC)
 	got := ticketExpiry(availableCredits([]byte(`{"credits":[
